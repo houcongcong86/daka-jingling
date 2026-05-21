@@ -4,6 +4,7 @@ import UnoCSS from 'unocss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
+  base: '/daka-jingling/',
   plugins: [
     vue(),
     UnoCSS(),
@@ -14,7 +15,7 @@ export default defineConfig({
         name: '打卡精灵',
         short_name: '打卡精灵',
         description: '儿童语音打卡工具',
-        start_url: '/',
+        start_url: '/daka-jingling/',
         display: 'standalone',
         orientation: 'portrait',
         background_color: '#FFF8E7',
