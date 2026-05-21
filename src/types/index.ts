@@ -2,7 +2,8 @@ export interface Task {
   id?: number
   name: string
   points: number
-  schedule: 'daily' | 'weekday' | 'weekend'
+  schedule: 'daily' | 'weekday' | 'weekend' | 'custom'
+  daysOfWeek: number[]   // 0=周日, 1=周一, ..., 6=周六
   sortOrder: number
   createdAt: string
 }

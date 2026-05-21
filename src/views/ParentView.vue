@@ -49,15 +49,21 @@ function closeForm() {
   editingTask.value = null
 }
 
-async function handleSave(data: { name: string; points: number; schedule: Task['schedule'] }) {
+async function handleSave(data: { name: string; points: number; schedule: Task['schedule']; daysOfWeek: number[] }) {
   if (editingTask.value) {
-    await tasksStore.updateTask(editingTask.value.id!, data)
+    await tasksStore.updateTask(editingTask.value.id!, {
+      name: data.name,
+      points: data.points,
+      schedule: data.schedule,
+      daysOfWeek: data.schedule === 'custom' ? data.daysOfWeek : [],
+    })
   } else {
     const maxOrder = Math.max(...tasksStore.tasks.map((t) => t.sortOrder), 0)
     await tasksStore.addTask({
       name: data.name,
       points: data.points,
       schedule: data.schedule,
+      daysOfWeek: data.schedule === 'custom' ? data.daysOfWeek : [],
       sortOrder: maxOrder + 1,
       createdAt: new Date().toISOString(),
     })

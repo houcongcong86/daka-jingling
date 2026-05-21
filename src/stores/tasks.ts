@@ -33,11 +33,12 @@ export const useTasksStore = defineStore('tasks', () => {
 
   function getTodayTasks(): Task[] {
     const today = new Date()
-    const day = today.getDay()
+    const day = today.getDay() // 0=周日, 1=周一...
     return tasks.value.filter((t) => {
       if (t.schedule === 'daily') return true
       if (t.schedule === 'weekday') return day >= 1 && day <= 5
       if (t.schedule === 'weekend') return day === 0 || day === 6
+      if (t.schedule === 'custom') return t.daysOfWeek.includes(day)
       return false
     })
   }

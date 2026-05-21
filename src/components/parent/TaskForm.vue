@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import type { Task } from '../../types'
 
 const props = defineProps<{
@@ -7,13 +7,42 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  save: [{ name: string; points: number; schedule: Task['schedule'] }]
+  save: [{ name: string; points: number; schedule: Task['schedule']; daysOfWeek: number[] }]
   cancel: []
 }>()
+
+const DAY_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 
 const name = ref('')
 const points = ref(3)
 const schedule = ref<Task['schedule']>('daily')
+const daysOfWeek = ref<number[]>([])
+
+const quickModes = [
+  { value: 'daily', label: '每天' },
+  { value: 'weekday', label: '工作日' },
+  { value: 'weekend', label: '周末' },
+  { value: 'custom', label: '自定义' },
+] as const
+
+const isCustom = computed(() => schedule.value === 'custom')
+
+function toggleDay(day: number) {
+  const idx = daysOfWeek.value.indexOf(day)
+  if (idx === -1) {
+    daysOfWeek.value.push(day)
+  } else {
+    daysOfWeek.value.splice(idx, 1)
+  }
+}
+
+function selectQuick(mode: Task['schedule']) {
+  schedule.value = mode
+  if (mode === 'custom' && daysOfWeek.value.length === 0) {
+    // 默认选中周一至周五
+    daysOfWeek.value = [1, 2, 3, 4, 5]
+  }
+}
 
 watch(
   () => props.task,
@@ -22,10 +51,12 @@ watch(
       name.value = t.name
       points.value = t.points
       schedule.value = t.schedule
+      daysOfWeek.value = [...(t.daysOfWeek || [])]
     } else {
       name.value = ''
       points.value = 3
       schedule.value = 'daily'
+      daysOfWeek.value = []
     }
   },
   { immediate: true }
@@ -33,10 +64,14 @@ watch(
 
 function submit() {
   if (!name.value.trim()) return
+  if (schedule.value === 'custom' && daysOfWeek.value.length === 0) {
+    return // 自定义模式至少选一天
+  }
   emit('save', {
     name: name.value.trim(),
     points: points.value,
     schedule: schedule.value,
+    daysOfWeek: schedule.value === 'custom' ? daysOfWeek.value : [],
   })
 }
 </script>
@@ -67,22 +102,29 @@ function submit() {
     </div>
     <div>
       <label class="text-sm text-gray-500">执行日期</label>
-      <div class="flex gap-2 mt-1">
+      <div class="flex flex-wrap gap-2 mt-1">
         <button
-          class="px-3 py-1 rounded-xl text-sm"
-          :class="schedule === 'daily' ? 'bg-orange-400 text-white' : 'bg-gray-100 text-gray-500'"
-          @click="schedule = 'daily'"
-        >每天</button>
+          v-for="mode in quickModes"
+          :key="mode.value"
+          class="px-3 py-1.5 rounded-xl text-sm font-medium transition"
+          :class="schedule === mode.value ? 'bg-orange-400 text-white shadow' : 'bg-gray-100 text-gray-500'"
+          @click="selectQuick(mode.value)"
+        >{{ mode.label }}</button>
+      </div>
+      <!-- 自定义：选具体星期 -->
+      <div v-if="isCustom" class="flex flex-wrap gap-2 mt-2">
         <button
-          class="px-3 py-1 rounded-xl text-sm"
-          :class="schedule === 'weekday' ? 'bg-orange-400 text-white' : 'bg-gray-100 text-gray-500'"
-          @click="schedule = 'weekday'"
-        >工作日</button>
-        <button
-          class="px-3 py-1 rounded-xl text-sm"
-          :class="schedule === 'weekend' ? 'bg-orange-400 text-white' : 'bg-gray-100 text-gray-500'"
-          @click="schedule = 'weekend'"
-        >周末</button>
+          v-for="day in 7"
+          :key="day"
+          class="w-9 h-9 rounded-full text-sm font-bold transition"
+          :class="daysOfWeek.includes(day % 7)
+            ? 'bg-orange-400 text-white shadow'
+            : 'bg-gray-50 text-gray-400 border border-gray-200'"
+          @click="toggleDay(day % 7)"
+        >{{ ['日','一','二','三','四','五','六'][day % 7] }}</button>
+      </div>
+      <div v-if="isCustom && daysOfWeek.length === 0" class="text-xs text-red-400 mt-1">
+        请至少选择一天
       </div>
     </div>
     <div class="flex gap-3 pt-2">
