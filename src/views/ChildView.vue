@@ -73,9 +73,15 @@ async function onVoiceEnd() {
   await stop()
   voiceStore.setListening(false)
 
-  if (transcript.value) {
-    voiceStore.lastTranscript = transcript.value
+  const text = transcript.value
+  if (text) {
+    voiceStore.lastTranscript = text
     await handleVoiceResult()
+  } else {
+    // 没有识别到语音时也给用户反馈
+    const msg = '我没有听到声音，请按住按钮说话哦'
+    voiceStore.addDialog('assistant', msg)
+    await speak(msg, settingsStore.settings.voiceSpeed)
   }
 }
 

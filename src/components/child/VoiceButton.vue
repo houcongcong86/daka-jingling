@@ -13,9 +13,11 @@ const emit = defineEmits<{
 }>()
 
 const pressing = ref(false)
+let touchUsed = false
 
 function onTouchStart(e: TouchEvent) {
   e.preventDefault()
+  touchUsed = true
   pressing.value = true
   emit('voiceStart')
 }
@@ -27,11 +29,14 @@ function onTouchEnd(e: TouchEvent) {
 }
 
 function onClick() {
-  // fallback for non-touch devices
-  if (!pressing.value) {
-    emit('voiceStart')
-    setTimeout(() => emit('voiceEnd'), 3000)
+  // iOS Safari 上 touch 后仍会触发 click，需跳过
+  if (touchUsed) {
+    touchUsed = false
+    return
   }
+  // fallback for non-touch devices
+  emit('voiceStart')
+  setTimeout(() => emit('voiceEnd'), 3000)
 }
 </script>
 
