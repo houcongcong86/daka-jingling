@@ -74,11 +74,9 @@ async function onVoiceStart() {
 }
 
 async function onVoiceEnd() {
-  stop()
+  // 等待识别完全结束（onend 触发），确保转录结果已更新
+  await stop()
   voiceStore.setListening(false)
-
-  // 短暂等待确保最后的识别结果已更新
-  await new Promise((r) => setTimeout(r, 300))
 
   if (transcript.value) {
     voiceStore.lastTranscript = transcript.value

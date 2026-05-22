@@ -8,6 +8,7 @@ export function useSpeechRecognition() {
   const error = ref<string | null>(null)
 
   let recognition: any = null
+  let stopResolve: (() => void) | null = null
 
   const SpeechRecognitionAPI = (window as any).SpeechRecognition
     || (window as any).webkitSpeechRecognition
@@ -38,10 +39,20 @@ export function useSpeechRecognition() {
     recognition.onerror = (event: any) => {
       error.value = event.error
       isListening.value = false
+      // 出错时也 resolve，避免 Promise 挂起
+      if (stopResolve) {
+        stopResolve()
+        stopResolve = null
+      }
     }
 
     recognition.onend = () => {
       isListening.value = false
+      // onend 在最后一次 onresult 之后触发，表示识别已完全结束
+      if (stopResolve) {
+        stopResolve()
+        stopResolve = null
+      }
     }
   }
 
@@ -58,10 +69,24 @@ export function useSpeechRecognition() {
     }
   }
 
-  function stop() {
-    if (!recognition) return
-    recognition.stop()
-    isListening.value = false
+  function stop(): Promise<void> {
+    return new Promise((resolve) => {
+      if (!recognition) {
+        resolve()
+        return
+      }
+      stopResolve = resolve
+      try {
+        recognition.stop()
+      } catch {
+        // 如果 stop 失败（如未启动），立即 resolve
+        isListening.value = false
+        if (stopResolve) {
+          stopResolve()
+          stopResolve = null
+        }
+      }
+    })
   }
 
   function toggle() {
