@@ -21,7 +21,7 @@ const recordsStore = useRecordsStore()
 const settingsStore = useSettingsStore()
 const voiceStore = useVoiceStore()
 const { isSupported, start, stop, transcript } = useSpeechRecognition()
-const { speak } = useSpeechSynthesis()
+const { speak, prime } = useSpeechSynthesis()
 
 const showCelebration = ref(false)
 const celebrationText = ref('')
@@ -60,17 +60,12 @@ async function handleVoiceResult() {
 }
 
 async function onVoiceStart() {
+  // 在用户手势中预触发语音合成（iOS Safari 需要）
+  prime()
+
   voiceStore.setListening(true)
   transcript.value = ''
   start()
-
-  // 持续检测语音识别结果
-  const checkTranscript = setInterval(() => {
-    if (!voiceStore.isListening) {
-      clearInterval(checkTranscript)
-      return
-    }
-  }, 100)
 }
 
 async function onVoiceEnd() {
@@ -85,6 +80,9 @@ async function onVoiceEnd() {
 }
 
 async function onManualComplete(taskName: string) {
+  // 在用户手势中预触发语音合成（iOS Safari 需要）
+  prime()
+
   voiceStore.lastTranscript = `${taskName}已完成`
   voiceStore.addDialog('user', `${taskName}已完成`)
   const command = parseVoiceCommand(`${taskName}已完成`)
