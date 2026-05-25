@@ -21,7 +21,7 @@ const recordsStore = useRecordsStore()
 const settingsStore = useSettingsStore()
 const voiceStore = useVoiceStore()
 const { isSupported, start, stop, transcript } = useSpeechRecognition()
-const { speak, prime } = useSpeechSynthesis()
+const { speak, prime, isSpeaking } = useSpeechSynthesis()
 
 const showCelebration = ref(false)
 const celebrationText = ref('')
@@ -56,7 +56,9 @@ async function handleVoiceResult() {
     setTimeout(() => { showCelebration.value = false }, 2000)
   }
 
+  voiceStore.setSpeaking(true)
   await speak(response, settingsStore.settings.voiceSpeed)
+  voiceStore.setSpeaking(false)
 }
 
 async function onVoiceStart() {
@@ -81,7 +83,9 @@ async function onVoiceEnd() {
     // 没有识别到语音时也给用户反馈
     const msg = '我没有听到声音，请按住按钮说话哦'
     voiceStore.addDialog('assistant', msg)
+    voiceStore.setSpeaking(true)
     await speak(msg, settingsStore.settings.voiceSpeed)
+    voiceStore.setSpeaking(false)
   }
 }
 
@@ -100,7 +104,9 @@ async function onManualComplete(taskName: string) {
   showCelebration.value = true
   setTimeout(() => { showCelebration.value = false }, 2000)
 
+  voiceStore.setSpeaking(true)
   await speak(response, settingsStore.settings.voiceSpeed)
+  voiceStore.setSpeaking(false)
 }
 
 function goToParent() {

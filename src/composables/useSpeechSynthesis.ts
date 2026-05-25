@@ -20,6 +20,8 @@ export function useSpeechSynthesis() {
     const silent = new SpeechSynthesisUtterance(' ')
     silent.volume = 0
     window.speechSynthesis.speak(silent)
+    // iOS Safari bug: speak 后可能立即进入 paused 状态，需要 resume
+    window.speechSynthesis.resume()
     primed = true
   }
 
@@ -49,6 +51,8 @@ export function useSpeechSynthesis() {
       }
 
       window.speechSynthesis.speak(utterance)
+      // iOS Safari bug: speak 后可能立即暂停，需 resume 恢复
+      window.speechSynthesis.resume()
     })
   }
 
