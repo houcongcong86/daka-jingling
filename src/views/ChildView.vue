@@ -8,6 +8,7 @@ import { useVoiceStore } from '../stores/voice'
 import { useSpeechRecognition } from '../composables/useSpeechRecognition'
 import { useSpeechSynthesis } from '../composables/useSpeechSynthesis'
 import { parseVoiceCommand, executeVoiceCommand } from '../composables/useVoiceCommands'
+import type { VoiceCommand } from '../types'
 import PointsDisplay from '../components/child/PointsDisplay.vue'
 import CharacterAvatar from '../components/child/CharacterAvatar.vue'
 import TaskList from '../components/child/TaskList.vue'
@@ -21,7 +22,7 @@ const recordsStore = useRecordsStore()
 const settingsStore = useSettingsStore()
 const voiceStore = useVoiceStore()
 const { isSupported, start, stop, transcript } = useSpeechRecognition()
-const { speak, prime, isSpeaking } = useSpeechSynthesis()
+const { speak, speakNow, prime, isSpeaking } = useSpeechSynthesis()
 
 const showCelebration = ref(false)
 const celebrationText = ref('')
@@ -37,32 +38,8 @@ const pendingTasks = computed(() =>
   todayTasks.value.filter((t) => !completedNames.value.has(t.name))
 )
 
-async function handleVoiceResult() {
-  const text = voiceStore.lastTranscript
-  if (!text) return
-
-  currentTranscript.value = text
-  voiceStore.addDialog('user', text)
-
-  const command = parseVoiceCommand(text)
-  const response = await executeVoiceCommand(command)
-  voiceStore.lastResponse = response
-  voiceStore.addDialog('assistant', response)
-
-  // 触发庆祝效果
-  if (command.type === 'complete_task') {
-    celebrationText.value = `+${todayTasks.value.find((t) => t.name === command.taskName)?.points || 0}`
-    showCelebration.value = true
-    setTimeout(() => { showCelebration.value = false }, 2000)
-  }
-
-  voiceStore.setSpeaking(true)
-  await speak(response, settingsStore.settings.voiceSpeed)
-  voiceStore.setSpeaking(false)
-}
-
 async function onVoiceStart() {
-  // 在用户手势中预触发语音合成（iOS Safari 需要）
+  // 在用户手势中预激活语音合成引擎（iOS Safari 需要）
   prime()
 
   voiceStore.setListening(true)
@@ -70,43 +47,133 @@ async function onVoiceStart() {
   start()
 }
 
-async function onVoiceEnd() {
-  // 等待识别完全结束（onend 触发），确保转录结果已更新
-  await stop()
+function onVoiceEnd() {
+  // 同步停止识别（不需要 await，stop 内部的 onend 回调会异步触发）
+  stop()
   voiceStore.setListening(false)
 
+  // 关键：在用户手势同步栈中立即处理并播报
+  // iOS Safari 要求 speechSynthesis.speak() 在用户手势同步调用栈中执行才能发声
   const text = transcript.value
   if (text) {
     voiceStore.lastTranscript = text
-    await handleVoiceResult()
+    currentTranscript.value = text
+    voiceStore.addDialog('user', text)
+
+    const command = parseVoiceCommand(text)
+
+    // 对于非 complete_task 的命令，executeVoiceCommand 是同步的，可以立即获取回复
+    // 对于 complete_task，先同步播报一个确认，异步完成后再播报详细结果
+    if (command.type !== 'complete_task') {
+      const response = getSyncResponse(command)
+      voiceStore.lastResponse = response
+      voiceStore.addDialog('assistant', response)
+      voiceStore.setSpeaking(true)
+      speakNow(response, settingsStore.settings.voiceSpeed).then(() => {
+        voiceStore.setSpeaking(false)
+      })
+    } else {
+      // 完成任务命令：先播报即时确认（保持手势栈），再异步写入记录
+      const taskName = command.taskName || ''
+      const confirmMsg = taskName ? `好的，${taskName}完成！` : '好的！'
+      voiceStore.addDialog('assistant', confirmMsg)
+      voiceStore.setSpeaking(true)
+
+      // 先在用户手势栈中同步 speak，激活音频引擎
+      speakNow(confirmMsg, settingsStore.settings.voiceSpeed).then(() => {
+        voiceStore.setSpeaking(false)
+        // 异步写入记录并获取完整回复
+        executeVoiceCommand(command).then((response) => {
+          voiceStore.lastResponse = response
+          voiceStore.addDialog('assistant', response)
+
+          celebrationText.value = `+${todayTasks.value.find((t) => t.name === taskName)?.points || 0}`
+          showCelebration.value = true
+          setTimeout(() => { showCelebration.value = false }, 2000)
+
+          // 此时 prime 已激活，后续 speak 应该可以发声
+          voiceStore.setSpeaking(true)
+          speak(response, settingsStore.settings.voiceSpeed).then(() => {
+            voiceStore.setSpeaking(false)
+          })
+        })
+      })
+    }
   } else {
     // 没有识别到语音时也给用户反馈
     const msg = '我没有听到声音，请按住按钮说话哦'
     voiceStore.addDialog('assistant', msg)
     voiceStore.setSpeaking(true)
-    await speak(msg, settingsStore.settings.voiceSpeed)
-    voiceStore.setSpeaking(false)
+    speakNow(msg, settingsStore.settings.voiceSpeed).then(() => {
+      voiceStore.setSpeaking(false)
+    })
+  }
+}
+
+/** 同步获取语音命令的回复（不涉及 IndexedDB 写入的命令） */
+function getSyncResponse(command: VoiceCommand): string {
+  const tasksStore_ = useTasksStore()
+  const recordsStore_ = useRecordsStore()
+
+  switch (command.type) {
+    case 'query_tasks': {
+      const tasks = tasksStore_.getTodayTasks()
+      if (tasks.length === 0) return '你今天没有任务，可以好好玩啦！'
+      const completed = recordsStore_.todayRecords.map((r) => r.taskName)
+      const pending = tasks.filter((t) => !completed.includes(t.name))
+      if (pending.length === 0) return '你今天的所有任务都已经完成啦！太棒了！'
+      const names = pending.map((t) => t.name).join('、')
+      const totalPoints = pending.reduce((s, t) => s + t.points, 0)
+      return `你今天有 ${pending.length} 个任务：${names}。完成可以获得 ${totalPoints} 积分，加油哦！`
+    }
+    case 'query_remaining': {
+      const tasks = tasksStore_.getTodayTasks()
+      const remaining = recordsStore_.getRemainingTaskNames(tasks.map((t) => t.name))
+      if (remaining.length === 0) return '你今天的所有任务都已经完成啦！太棒了！'
+      const remainStr = remaining.join('、')
+      return `你今天还有 ${remaining.length} 个任务没完成：${remainStr}。加油，你可以的！`
+    }
+    case 'query_points': {
+      const total = recordsStore_.totalPoints
+      const today = recordsStore_.todayPoints
+      return `你现在一共有 ${total} 积分，今天获得了 ${today} 积分。继续加油攒积分吧！`
+    }
+    default:
+      return '我没听明白，可以再说一遍吗？'
   }
 }
 
 async function onManualComplete(taskName: string) {
-  // 在用户手势中预触发语音合成（iOS Safari 需要）
+  // 在用户手势中预激活语音合成引擎（iOS Safari 需要）
   prime()
 
   voiceStore.lastTranscript = `${taskName}已完成`
   voiceStore.addDialog('user', `${taskName}已完成`)
   const command = parseVoiceCommand(`${taskName}已完成`)
-  const response = await executeVoiceCommand(command)
-  voiceStore.lastResponse = response
-  voiceStore.addDialog('assistant', response)
 
-  celebrationText.value = `+${todayTasks.value.find((t) => t.name === taskName)?.points || 0}`
-  showCelebration.value = true
-  setTimeout(() => { showCelebration.value = false }, 2000)
-
+  // 在用户手势同步栈中先播报即时确认
+  const confirmMsg = `好的，${taskName}完成！`
+  voiceStore.addDialog('assistant', confirmMsg)
   voiceStore.setSpeaking(true)
-  await speak(response, settingsStore.settings.voiceSpeed)
-  voiceStore.setSpeaking(false)
+
+  speakNow(confirmMsg, settingsStore.settings.voiceSpeed).then(() => {
+    voiceStore.setSpeaking(false)
+
+    // 异步写入记录并获取完整回复
+    executeVoiceCommand(command).then((response) => {
+      voiceStore.lastResponse = response
+      voiceStore.addDialog('assistant', response)
+
+      celebrationText.value = `+${todayTasks.value.find((t) => t.name === taskName)?.points || 0}`
+      showCelebration.value = true
+      setTimeout(() => { showCelebration.value = false }, 2000)
+
+      voiceStore.setSpeaking(true)
+      speak(response, settingsStore.settings.voiceSpeed).then(() => {
+        voiceStore.setSpeaking(false)
+      })
+    })
+  })
 }
 
 function goToParent() {

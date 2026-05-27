@@ -3,7 +3,6 @@ import { ref, onUnmounted } from 'vue'
 export function useSpeechSynthesis() {
   const isSupported = ref(false)
   const isSpeaking = ref(false)
-  let primed = false
   let resumeTimer: ReturnType<typeof setInterval> | null = null
   let currentUtterance: SpeechSynthesisUtterance | null = null
 
@@ -43,58 +42,78 @@ export function useSpeechSynthesis() {
   }
 
   /**
-   * 在用户手势上下文中预触发语音合成。
-   * iOS Safari 要求首次 speak() 必须在用户手势同步代码中执行，
-   * 否则后续异步调用不会发声。
-   * 同时加载语音列表，确保 getVoices() 可用。
+   * 创建并配置一个 SpeechSynthesisUtterance，但不立即 speak。
+   * 用于在用户手势同步栈中提前创建，确保 iOS Safari 能正确发声。
    */
-  function prime() {
-    if (!isSupported.value || primed) return
-    window.speechSynthesis.cancel()
+  function createUtterance(text: string, rate: number = 0.9): SpeechSynthesisUtterance {
+    const utterance = new SpeechSynthesisUtterance(text)
+    utterance.lang = 'zh-CN'
+    utterance.rate = rate
+    utterance.pitch = 1.2
+    utterance.volume = 1
 
-    // 触发语音列表加载（iOS Safari 异步加载 voices）
-    window.speechSynthesis.getVoices()
+    const voice = getChineseVoice()
+    if (voice) {
+      utterance.voice = voice
+    }
 
-    // 使用非空字符串，确保 iOS Safari 音频引擎真正激活（空字符串可能被视为 no-op）
-    const silent = new SpeechSynthesisUtterance(' ')
-    silent.volume = 0
-    silent.lang = 'zh-CN'
-    window.speechSynthesis.speak(silent)
-    primed = true
+    utterance.onstart = () => {
+      isSpeaking.value = true
+      startResumeKeeper()
+    }
+    utterance.onend = () => {
+      isSpeaking.value = false
+      stopResumeKeeper()
+      currentUtterance = null
+    }
+    utterance.onerror = () => {
+      isSpeaking.value = false
+      stopResumeKeeper()
+      currentUtterance = null
+    }
+
+    return utterance
   }
 
-  function speak(text: string, rate: number = 0.9): Promise<void> {
+  /**
+   * 在用户手势上下文中预激活语音合成引擎。
+   * iOS Safari 要求首次 speak 必须在用户手势同步代码中执行，
+   * 否则后续异步调用不会发声。
+   * 加载语音列表，确保 getVoices() 可用。
+   */
+  function prime() {
+    if (!isSupported.value) return
+    window.speechSynthesis.getVoices()
+
+    // 用非空内容激活音频引擎，音量为 0 用户听不到
+    const silent = new SpeechSynthesisUtterance('\u0000')
+    silent.volume = 0
+    silent.lang = 'zh-CN'
+    const voice = getChineseVoice()
+    if (voice) silent.voice = voice
+    window.speechSynthesis.speak(silent)
+  }
+
+  /**
+   * 在用户手势同步栈中立即开始播报。
+   * 关键：必须在用户手势回调中同步调用，iOS Safari 才会发声。
+   * 返回 Promise 在播报结束时 resolve。
+   */
+  function speakNow(text: string, rate: number = 0.9): Promise<void> {
     return new Promise((resolve) => {
       if (!isSupported.value) {
         resolve()
         return
       }
 
-      // 停止之前的播报和保活定时器
       stopResumeKeeper()
 
-      // 仅在有正在播报的内容时才 cancel，避免破坏 prime() 激活状态
+      // 停止之前的播报
       if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
         window.speechSynthesis.cancel()
       }
 
-      const utterance = new SpeechSynthesisUtterance(text)
-      utterance.lang = 'zh-CN'
-      utterance.rate = rate
-      utterance.pitch = 1.2
-      utterance.volume = 1
-
-      // 显式选择中文语音（iOS Safari 不设置 voice 可能使用默认无声音）
-      const voice = getChineseVoice()
-      if (voice) {
-        utterance.voice = voice
-      }
-
-      utterance.onstart = () => {
-        isSpeaking.value = true
-        // 启动保活定时器，防止 iOS Safari 中途暂停
-        startResumeKeeper()
-      }
+      const utterance = createUtterance(text, rate)
       utterance.onend = () => {
         isSpeaking.value = false
         stopResumeKeeper()
@@ -109,14 +128,20 @@ export function useSpeechSynthesis() {
       }
 
       currentUtterance = utterance
+      isSpeaking.value = true
 
-      // iOS Safari: cancel() 后需要短暂延迟再 speak，否则可能静默失败
-      setTimeout(() => {
-        window.speechSynthesis.speak(utterance)
-        // 立即 resume，防止 iOS Safari speak 后进入 paused 状态
-        window.speechSynthesis.resume()
-      }, 100)
+      // 同步调用 speak()，必须在用户手势栈中
+      window.speechSynthesis.speak(utterance)
+      window.speechSynthesis.resume()
     })
+  }
+
+  /**
+   * 异步播报（兼容旧调用方式）。
+   * 注意：在 iOS Safari 上如果不在用户手势上下文中调用，可能无声。
+   */
+  function speak(text: string, rate: number = 0.9): Promise<void> {
+    return speakNow(text, rate)
   }
 
   function stop() {
@@ -130,5 +155,5 @@ export function useSpeechSynthesis() {
     stop()
   })
 
-  return { isSupported, isSpeaking, speak, stop, prime }
+  return { isSupported, isSpeaking, speak, speakNow, stop, prime }
 }
