@@ -55,7 +55,8 @@ export function useSpeechSynthesis() {
     // 触发语音列表加载（iOS Safari 异步加载 voices）
     window.speechSynthesis.getVoices()
 
-    const silent = new SpeechSynthesisUtterance('')
+    // 使用非空字符串，确保 iOS Safari 音频引擎真正激活（空字符串可能被视为 no-op）
+    const silent = new SpeechSynthesisUtterance(' ')
     silent.volume = 0
     silent.lang = 'zh-CN'
     window.speechSynthesis.speak(silent)
@@ -71,7 +72,11 @@ export function useSpeechSynthesis() {
 
       // 停止之前的播报和保活定时器
       stopResumeKeeper()
-      window.speechSynthesis.cancel()
+
+      // 仅在有正在播报的内容时才 cancel，避免破坏 prime() 激活状态
+      if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+        window.speechSynthesis.cancel()
+      }
 
       const utterance = new SpeechSynthesisUtterance(text)
       utterance.lang = 'zh-CN'
